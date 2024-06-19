@@ -1,0 +1,173 @@
+name: Update version
+
+on:
+  workflow_call:
+    secrets:
+      access_token:
+        required: true
+
+    inputs:
+      dry_run:
+        required: true
+        type: boolean
+      is_master:
+        required: true
+        type: boolean
+      
+    outputs:
+      new_package_version:
+        value: ${{ jobs.build_module.outputs.new_package_version }}
+
+jobs:
+  build_module:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      new_package_version: ${{ steps.output_version.outputs.new_package_version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 3
+          ref: ${{ github.event.release.target_commitish }}
+
+      - name: Restore node_modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-npm-${{ github.sha }}
+
+      - name: Setup git bot user
+        run: |
+          git config --local user.email "dev.alianwar@gmail.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Check if working directory is clean
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "Working directory is not clean. Stashing changes..."
+            git stash push --keep-index --quiet
+            STASHED_CHANGES=true
+          else
+            echo "Working directory is clean."
+            STASHED_CHANGES=false
+          fi
+
+      - name: Extract branch name from merge commit
+        id: extract_branch
+        run: |
+          # Get the commit message of the head commit
+          commit_message=$(git log -1 --pretty=%B)
+          echo "Commit message: $commit_message"
+          
+          # Extract branch name from commit message
+          if [[ "$commit_message" =~ Merge\ pull\ request\ #[0-9]+\ from\ ([^/]+)/([^[:space:]]+) ]]; then
+            merged_branch=${BASH_REMATCH[2]}
+          else
+            merged_branch="unknown"
+          fi
+          
+          echo "Merged branch: $merged_branch"
+          echo "::set-output name=branch::$merged_branch"
+
+      - name: Check if branch name starts with 'feature/', 'fix/', or 'hotfix/'
+        id: extract_branch_type
+        run: |
+          # Retrieve the branch name from the previous step's output
+          branch_name="${{ steps.extract_branch.outputs.branch }}"
+          
+          # Check if the branch name matches specific patterns
+          if [[ "$branch_name" == feature/* ]]; then
+            echo "Feature branch merged"
+            # Set the merge_branch_type output variable to 'feature'
+            branch_type="feature"
+          elif [[ "$branch_name" == bugfix/* ]]; then
+            echo "Fix branch merged"
+            # Set the merge_branch_type output variable to 'fix'
+            branch_type="fix"
+          elif [[ "$branch_name" == hotfix/* ]]; then
+            echo "Hotfix branch merged"
+            # Set the merge_branch_type output variable to 'hotfix'
+            branch_type="hotfix"
+          elif [[ "$branch_name" == release/* ]]; then
+            echo "Release branch merged"
+            # Set the merge_branch_type output variable to 'release'
+            branch_type="release"
+          else
+            echo "Branch does not start with feature/, fix/, or hotfix/"
+            # Set the merge_branch_type output variable to 'none'
+            branch_type="none"
+          fi
+
+          # Echo the merged branch type for confirmation
+          echo "Merged branch type: $branch_type"
+          echo "merge_branch_type=$branch_type" >> $GITHUB_ENV
+
+      - name: Abort workflow if branch name doesn't match criteria
+        if: env.merge_branch_type == 'none'
+        run: exit 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Increment Version
+        if: env.merge_branch_type == 'hotfix'
+        env:
+          GITHUB_TOKEN: ${{ secrets.access_token }}
+        run: |
+          git tag -l | xargs git tag -d
+          git fetch --tags -f
+          npm run incrementVersion
+
+      - name: Increment Branch Version
+        if: env.merge_branch_type == 'release' || env.merge_branch_type == 'feature' || env.merge_branch_type == 'bugfix'
+        env:
+          GITHUB_TOKEN: ${{ secrets.access_token }}
+        run: |
+          git tag -l | xargs git tag -d
+          git fetch --tags -f
+          npm run incrementBranchVersion
+
+      - name: Push tags
+        if: env.merge_branch_type != 'none'
+        env:
+          GITHUB_TOKEN: ${{ secrets.access_token }}
+        run: |
+          set -e
+          echo "GITHUB_TOKEN: ${{ secrets.access_token }}"
+          echo "Repository URL: https://github.com/${{ github.repository }}.git"
+          VERSION=
+          git push origin tag v$(jq -r .version package.json) | {
+            while IFS= read -r line; do
+              if [[ $line == *"To https"* && $line == *"already exists"* ]]; then
+                echo "Tag already exists. Skipping push."
+                exit 0
+              elif [[ $line == *"Permission denied"* ]]; then
+                echo "Permission denied. Make sure you have the necessary permissions."
+                exit 1
+              fi
+              echo "$line"
+            done
+            }
+            git push origin main
+
+      - name: Output package version
+        id: output_version
+        run: echo "new_package_version=$(jq -r .version package.json)" >> $GITHUB_ENV
+
+      - name: Rebase release branch on master
+        if: env.merge_branch_type == 'feature' || env.merge_branch_type == 'hotfix' || env.merge_branch_type == 'bugfix'
+        env:
+          GITHUB_TOKEN: ${{ secrets.access_token }}
+        run: |
+          git checkout master
+          git pull origin master
+          git checkout release
+          git rebase master

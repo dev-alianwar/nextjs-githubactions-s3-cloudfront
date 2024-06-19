@@ -1,23 +1,37 @@
 ### Deploy Next.js to S3 CloudFront
 In this example, Nest.js application is deployed as static resource to S3 and cloudfront using GithubActions. 
  
-## Explanation
-1. Checkout repository: Uses the actions/checkout@v2 action to check out your repository.
-2. Setup Node.js: Uses the actions/setup-node@v2 action to set up the Node.js environment. Adjust the node-version as needed.
-3. Install dependencies: Runs npm install to install project dependencies.
-4. Build Next.js application: Runs npm run build to build the application.
-5. Export Next.js application: Runs npm run export to export the application to static HTML.
-6. Sync to S3: Uses the AWS CLI to sync the out/ directory (the exported static site) to your S3 bucket. Make sure to replace your-s3-bucket-name with your actual S3 bucket name.
-7. Invalidate CloudFront: Uses the AWS CLI to invalidate the CloudFront cache, ensuring that the latest files are served.
+## Github Action Tagging and Branch release 
+- Github action will create tags based oon incoming branches feature/*, bugfix/* or hotfix/* branch is merged into master 
+- When hotfix/* is merged it will increment version in package.json and create github tag
+- When feature/*, bugfix/ or hotfix/*  will be merged into master, it will rebase the the release branch on master
+- When feature/*, release/* or bugfix/* will be merged into master it will increment branch version like 1.0.2 to 2.0.0. 
+- Finally, Github action will deploy build to S3 and Cloudfront
 
-# Secrets
-To securely store your AWS credentials and other sensitive information, add the following secrets to your GitHub repository:
+## Git Workflow Diagram
+```mermaid
+graph TD;
+    bugfix/*-->release;
+    feature/*-->release;
+    release-->master;
+    hotfix/*-->master;
+    release-->master;
+    master-->release;
+    master-->s3;
+    s3-->CloudFront;
 ```
-AWS_REGION: Your AWS region (e.g., us-west-2).
-AWS_ACCESS_KEY_ID: Your AWS access key ID.
-AWS_SECRET_ACCESS_KEY: Your AWS secret access key.
-CLOUDFRONT_DISTRIBUTION_ID: Your CloudFront distribution ID.
-```
+
+# Github Secrets
+Please add following secrets to run github actions:
+
+Go to repository -> Settings -> Secrets and Variables -> Actions -> New repository secret
+
+GH_PAT:<access_token>  
+AWS_REGION: 
+AWS_ACCESS_KEY_ID:
+AWS_SECRET_ACCESS_KEY: 
+CLOUDFRONT_DISTRIBUTION_ID:
+
 # To add secrets to your GitHub repository:
 - Go to your repository on GitHub.
 - Click on Settings.
