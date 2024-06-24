@@ -1,4 +1,4 @@
-name: Test, Update Version, Build and Deploy
+name: Build module and deploy to Cloudfront
 
 on:
   push:
@@ -7,55 +7,28 @@ on:
 
 env:
   REPO_OWNER: dev-alianwar
-  REPO_NAME: nextjs-githubactions-s3-cloudfront
+  REPO_NAME: nestjs-github-actions-aws-ecs
 
 jobs:
   setup:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
-        with:
-          node-version: '20'
-
-  test:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      
-      - name: Install dependencies
-        run: npm install
-
-      - name: Run tests
-        run: npm test
-
-  build:
-    needs: [setup, test]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build
+    uses: dev-alianwar/nestjs-github-actions-aws-ecs/.github/workflows/setup.yml@master
 
   update-version:
-    needs: [setup, test, build]
-    uses: dev-alianwar/nextjs-githubactions-s3-cloudfront/.github/workflows/update-version.yml@master
+    needs: setup
+    uses: dev-alianwar/nestjs-github-actions-aws-ecs/.github/workflows/update-version.yml@master
     secrets:
       access_token: ${{ secrets.GH_PAT }}
-    with:
-      dry_run: false
-      is_master: true
 
   deploy:
-    needs: [setup, build]
-    uses: dev-alianwar/ci-cd-example/.github/actions/deploy@master
+    needs: [setup, update-version]
+    uses: dev-alianwar/nestjs-github-actions-aws-ecs/.github/workflows/deploy.yml@master
+    secrets:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}        
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      ECS_CLUSTER: ${{ secrets.ECS_CLUSTER }}       
+      ECS_SERVICE:  ${{ secrets.ECS_SERVICE }}      
+      ECS_TASK_DEFINITION: ${{ secrets.ECS_TASK_DEFINITION }}
+      

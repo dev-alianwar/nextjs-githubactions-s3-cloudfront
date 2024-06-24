@@ -1,0 +1,37 @@
+name: Build Module
+
+on:
+  workflow_call:
+
+    inputs:
+      dry_run:
+        required: true
+        type: boolean
+      is_master:
+        required: true
+        type: boolean
+
+jobs:
+  build_module:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Setup Node
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build (dry-run)
+        if: ${{ inputs.dry_run }}
+        run: npm run build
+
+      - name: Build (with new package version)
+        if: ${{ !inputs.dry_run }}
+        env:
+          PACKAGE_VERSION: $(jq -r .version package.json)
+          GIT_SHA: ${{ github.sha }}
+        run: npm run build

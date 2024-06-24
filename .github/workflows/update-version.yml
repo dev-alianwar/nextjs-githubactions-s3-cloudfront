@@ -3,23 +3,15 @@ name: Update version
 on:
   workflow_call:
     secrets:
-      access_token:
+      ACCESS_TOKEN:
         required: true
-
-    inputs:
-      dry_run:
-        required: true
-        type: boolean
-      is_master:
-        required: true
-        type: boolean
       
     outputs:
       new_package_version:
-        value: ${{ jobs.build_module.outputs.new_package_version }}
+        value: ${{ jobs.update_version.outputs.new_package_version }}
 
 jobs:
-  build_module:
+  update_version:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -72,7 +64,7 @@ jobs:
           echo "Merged branch: $merged_branch"
           echo "::set-output name=branch::$merged_branch"
 
-      - name: Check if branch name starts with 'feature/', 'fix/', or 'hotfix/'
+      - name: Check if branch name starts with 'feature/', 'bugfix/', or 'hotfix/'
         id: extract_branch_type
         run: |
           # Retrieve the branch name from the previous step's output
@@ -81,23 +73,19 @@ jobs:
           # Check if the branch name matches specific patterns
           if [[ "$branch_name" == feature/* ]]; then
             echo "Feature branch merged"
-            # Set the merge_branch_type output variable to 'feature'
             branch_type="feature"
           elif [[ "$branch_name" == bugfix/* ]]; then
-            echo "Fix branch merged"
+            echo "BugFix branch merged"
             # Set the merge_branch_type output variable to 'fix'
-            branch_type="fix"
+            branch_type="bugfix"
           elif [[ "$branch_name" == hotfix/* ]]; then
             echo "Hotfix branch merged"
-            # Set the merge_branch_type output variable to 'hotfix'
             branch_type="hotfix"
-          elif [[ "$branch_name" == release/* ]]; then
-            echo "Release branch merged"
-            # Set the merge_branch_type output variable to 'release'
-            branch_type="release"
+          elif [[ "$branch_name" == develop/* || "$branch_name" == develop ]]; then
+            echo "Develop branch merged"
+            branch_type="develop"
           else
-            echo "Branch does not start with feature/, fix/, or hotfix/"
-            # Set the merge_branch_type output variable to 'none'
+            echo "Branch does not start with develop, feature/, bugfix/, or hotfix/"
             branch_type="none"
           fi
 
@@ -120,28 +108,30 @@ jobs:
       - name: Increment Version
         if: env.merge_branch_type == 'hotfix'
         env:
-          GITHUB_TOKEN: ${{ secrets.access_token }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
           git tag -l | xargs git tag -d
           git fetch --tags -f
+          git stash
           npm run incrementVersion
-
+          
       - name: Increment Branch Version
-        if: env.merge_branch_type == 'release' || env.merge_branch_type == 'feature' || env.merge_branch_type == 'bugfix'
+        if: env.merge_branch_type == 'develop' || env.merge_branch_type == 'feature' || env.merge_branch_type == 'bugfix'
         env:
-          GITHUB_TOKEN: ${{ secrets.access_token }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
           git tag -l | xargs git tag -d
           git fetch --tags -f
+          git stash
           npm run incrementBranchVersion
 
       - name: Push tags
         if: env.merge_branch_type != 'none'
         env:
-          GITHUB_TOKEN: ${{ secrets.access_token }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
           set -e
-          echo "GITHUB_TOKEN: ${{ secrets.access_token }}"
+          echo "GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}"
           echo "Repository URL: https://github.com/${{ github.repository }}.git"
           VERSION=
           git push origin tag v$(jq -r .version package.json) | {
@@ -156,18 +146,26 @@ jobs:
               echo "$line"
             done
             }
-            git push origin main
+            git push origin --tags
 
       - name: Output package version
         id: output_version
         run: echo "new_package_version=$(jq -r .version package.json)" >> $GITHUB_ENV
 
-      - name: Rebase release branch on master
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.ACCESS_TOKEN }}
+        run: |
+          new_tag=$(jq -r .version package.json)
+          gh release create v$new_tag --target master
+          git push origin master
+
+      - name: Rebase develop branch on master
         if: env.merge_branch_type == 'feature' || env.merge_branch_type == 'hotfix' || env.merge_branch_type == 'bugfix'
         env:
-          GITHUB_TOKEN: ${{ secrets.access_token }}
+          GITHUB_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         run: |
           git checkout master
           git pull origin master
-          git checkout release
+          git checkout develop
           git rebase master
